@@ -1,0 +1,12 @@
+echo -- Programming FPGA --;
+fatload mmc 0:1 0x2000000 socfpga_cyclone5_de10_nano.rbf; 
+fpga load 0 0x2000000 0x6AEBE4; 
+bridge enable
+setenv bootargs "root=/dev/mmcblk0p2 rw rootwait earlyprintk debug console=ttyS0,115200n8"
+echo -- Loading Kernel Image --;
+fatload mmc 0:1 $loadaddr zImage;
+echo -- Loading Device Tree Blob --;
+fatload mmc 0:1 $fdt_addr_r socfpga_cyclone5_de10_nano.dtb;
+echo -- Bringing DMA Peripheral Requests out of reset --;
+mw.b 0xFFD05018 0xF0;
+bootz $loadaddr - $fdt_addr_r

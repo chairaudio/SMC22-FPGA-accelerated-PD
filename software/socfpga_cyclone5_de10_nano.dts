@@ -1,0 +1,219 @@
+/*
+*  Copyright (C) 2013 Steffen Trumtrar <s.trumtrar@pengutronix.de>
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include "socfpga_cyclone5.dtsi"
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+    model = "Terasic SoCkit";
+    compatible = "altr,socfpga-cyclone5", "altr,socfpga";
+    
+/*
+    sound { 
+
+        compatible = "opencores,de1soc-wm8731-audio";
+        i2s-controller = <&i2s>;
+        audio-codec = <&codec>;
+        i2c-mux-gpio = <&gpio1 19 0>;
+    };
+    */
+    sound {
+        compatible = "simple-audio-card";
+        simple-audio-card,name = "Tickle-Sound-Card";
+        
+        simple-audio-card,format = "i2s";
+        status = "okay";
+
+        simple-audio-card,widgets =
+                                "Headphone", "Headphone Jack",
+                                "Microphone", "Microphone Jack",
+                                "Line", "Line In";
+        simple-audio-card,routing =
+                                "Headphone Jack", "RHPOUT",
+                                "Headphone Jack", "LHPOUT",
+                                "LLINEIN", "Line In",
+                                "RLINEIN", "Line In",
+                                "MICIN", "Microphone Jack";
+                                /* "MICIN", "Mic Bias", */
+                                /* "Mic Bias", "Microphone Jack"; */
+
+        simple-audio-card,cpu {
+            sound-dai = <&i2s 0>;
+            bitclock-master;
+            frame-master;
+
+        };
+
+        simple-audio-card,codec {
+            sound-dai = <&codec>;
+        };
+
+    };
+    
+    wm8731_mclk: wm8731 {
+                compatible = "fixed-clock";
+                #clock-cells = <0>;
+                clock-frequency = <12288000>;
+    };
+
+    clk48: clk48 {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency  = <24576000>;
+        clock-output-names = "clk48";
+    };
+
+    clk44: clk44 {
+        compatible = "fixed-clock";
+        #clock-cells = <0>;
+        clock-frequency  = <33868800>;
+        clock-output-names = "clk44";
+    };
+
+    i2s: i2s@0 {
+        #sound-dai-cells = <1>;
+        compatible = "opencores,i2s";
+        reg = <0xff200000 0x20>, <0xff200020 0x20>;
+        clocks = <&clk44>, <&clk48>;
+        clock-names = "clk44", "clk48";
+        dmas = <&pdma 0>, <&pdma 1>;
+        dma-names = "tx", "rx";
+    };
+
+    chosen {
+        bootargs = "console=ttyS0,115200";
+    };
+
+    memory {
+        name = "memory";
+        device_type = "memory";
+        reg = <0x0 0x40000000>; /* 1GB */
+    };
+
+    aliases {
+        /* this allow the ethaddr uboot environmnet variable contents
+        * to be added to the gmac1 device tree blob.
+        */
+        ethernet0 = &gmac1;
+    };
+
+    regulator_3_3v: vcc3p3-regulator {
+        compatible = "regulator-fixed";
+        regulator-name = "VCC3P3";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+    };
+};
+
+&gmac1 {
+    status = "okay";
+    phy-mode = "rgmii";
+
+    rxd0-skew-ps = <0>;
+    rxd1-skew-ps = <0>;
+    rxd2-skew-ps = <0>;
+    rxd3-skew-ps = <0>;
+    txen-skew-ps = <0>;
+    txc-skew-ps = <2600>;
+    rxdv-skew-ps = <0>;
+    rxc-skew-ps = <2000>;
+};
+/*
+&mmc0 {
+    vmmc-supply = <&regulator_3_3v>;
+    vqmmc-supply = <&regulator_3_3v>;
+};*/
+
+&mmc {
+    status = "okay";
+    num-slots = <0x1>;
+    supports-highspeed;
+    broken-cd;
+    altr,dw-mshc-ciu-div = <0x3>;
+    altr,dw-mshc-sdr-timing = <0x0 0x3>;
+
+    slot@0 {
+        reg = <0x0>;
+        bus-width = <0x4>;
+    };
+};
+
+
+&usb1 {
+    status = "okay";
+};
+
+&qspi {
+    flash0: n25q00@0 {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "n25q00";
+        reg = <0>;      /* chip select */
+        spi-max-frequency = <100000000>;
+        m25p,fast-read;
+        page-size = <256>;
+        block-size = <16>; /* 2^16, 64KB */
+        read-delay = <4>;  /* delay value in read data capture register */
+        tshsl-ns = <50>;
+        tsd2d-ns = <50>;
+        tchsh-ns = <4>;
+        tslch-ns = <4>;
+
+        partition@qspi-boot {
+            /* 8MB for raw data. */
+            label = "Flash 0 Raw Data";
+            reg = <0x0 0x800000>;
+        };
+
+        partition@qspi-rootfs {
+            /* 120MB for jffs2 data. */
+            label = "Flash 0 jffs2 Filesystem";
+            reg = <0x800000 0x7800000>;
+        };
+    };
+};
+
+&i2c0 {
+    status = "okay";
+};
+
+&i2c1{
+    status = "okay";
+};
+
+&i2c2 {
+    status = "okay";
+};
+
+&i2c3 {
+    status = "okay";
+    clock-frequency = <100000>;
+    i2c-sda-hold-time-ns = <300>;
+    i2c-sda-falling-time-ns = <50>;
+    i2c-scl-falling-time-ns = <50>;
+    speed-mode = <0>;
+    
+    codec: wm8731@1a { //codec: wm8731@34 {
+        #sound-dai-cells = <0>;
+        compatible = "wlf,wm8731";
+        reg = <0x1a>;
+        AVDD-supply = <&regulator_3_3v>;
+        HPVDD-supply = <&regulator_3_3v>;
+        DCVDD-supply = <&regulator_3_3v>;
+        DBVDD-supply = <&regulator_3_3v>;
+    };
+};
