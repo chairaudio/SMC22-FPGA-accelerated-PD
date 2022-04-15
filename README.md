@@ -30,7 +30,7 @@ This system was built and tested with the Linux Console (kernel 4.5) image as a 
 
 Since the DE10-Nano does not feature an audio codec, a WM8731 on the MIKROE-506 board was used. The connections were made as shown in the following figure.
 
-![hardware-conections](https://github.com/clwe/SMC22-FPGA-accelerated-PD/hardware-conections.png)
+![hardware-conections](https://github.com/chairaudio/SMC22-FPGA-accelerated-PD/blob/main/hardware-conections.png?raw=true)
 
 ### Desoldering the Onboard Oscillator
 
