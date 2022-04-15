@@ -11,6 +11,10 @@ https://github.com/bsteinsbo/DE1-SoC-Sound
 
 Sound card support was adapted to the DE10-Nano and a newer Linux kernel (linux-socfpga-5.4.54-lts). 
 
+## Mass-Interaction Physical Modelling
+
+The main branch contains digital logic for measuring maximum FPGA compute load as described in the paper. To access the mass interaction digital logic, checkout the branch `mass-interaction-dsp`.
+
 ## How to use
 
 This system was built and tested with the Linux Console (kernel 4.5) image as a starting point from https://www.terasic.com.tw/cgi-bin/page/archive.pl?Language=English&CategoryNo=165&No=1046&PartNo=4. Other images might work as well. Keep in mind, that the digital logic of the video frame buffers for use with the desktop images are proprietary and only compile with an appropriate license.
