@@ -4,7 +4,7 @@ This source code accompanies the paper Wegener, Clemens, Sebastian Stang and Max
 
 ## Overview
 
-This repository contains the FPGA design (Quartus project) for enabling WM8731 sound card support and a pass-through audio stream from Pure Data running on Linux (ARM core) and the FPGA fabric. 
+This repository contains the FPGA design (Quartus project) for enabling WM8731 sound card support and a pass-through audio stream from Pure Data running on Linux (ARM core) and the FPGA fabric. While audio buffers are passing through FPGA logic they are timestamped and checked for dropouts. Addionally, Pure Data patches and externals are provided for measuring buffer interval timings and to access the mass-interaction FPGA logic.
 
 The sound card support is based on Bjarne Steinsbo's Source Code:
 https://github.com/bsteinsbo/DE1-SoC-Sound
