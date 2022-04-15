@@ -2,7 +2,7 @@
 // Copyright (c) 2016 Intel Corporation
 // SPDX-License-Identifier: MIT
 
-module de10_nano_audio_stream 
+module de10_nano_mass_interaction_dsp 
 #(
         parameter MEM_A_WIDTH,
         parameter MEM_D_WIDTH,
@@ -126,6 +126,8 @@ module de10_nano_audio_stream
 
 //REG/WIRE Declarations
 
+wire [1:0] fpga_debounced_buttons;
+
 // i2c connection
 wire hdmi_internal_scl_o_e;
 wire hdmi_internal_scl_o;
@@ -195,6 +197,27 @@ ALT_IOBUF fpga_sda_iobuf (.i(1'b0), .oe(fpga_i2c_internal_sda_o_e), .o(fpga_i2c_
 	
 	wire [31:0] mi_connection_memory_read_data;
 	wire [9:0]  mi_connection_memory_addr;
+
+	reg signed [31:0] in_smp_buf_read_data;
+	reg signed [31:0] in_smp_buf_write_data;
+	reg unsigned [31:0]  in_smp_buf_addr; // 10bit is 0-1024
+	reg signed [31:0] in_smp_buf_n_smp = 0; // max 512 samples
+	reg in_smp_buf_we;
+
+	wire signed [31:0] out_smp_buf_read_data;
+	reg  signed [31:0] out_smp_buf_write_data;
+	reg  [31:0]  out_smp_buf_addr; // 10bit is 0-1024
+	reg out_smp_buf_we;
+
+	reg [31:0] smp_idx = 0;
+
+	reg signed  [26:0]		mi_pipeline_in;
+	wire signed [26:0]		mi_pipeline_out;
+	reg pipeline_reset = 0;
+	wire mi_pipeline_ready;
+	reg signed [27:0] in_old_old = 0, in_old = 0, acceleration = 0, diff1 = 0, diff2 = 0;
+
+	reg [31:0] buf_state = 0; // reset
 	
 // SoC sub-system module
 soc_system soc_inst (
@@ -309,7 +332,7 @@ soc_system soc_inst (
 . i2s_output_apb_0_playback_dma_req ( hps_0_f2h_dma_req0_dma_single ),
 . i2s_output_apb_0_playback_dma_ack ( hps_0_f2h_dma_req0_dma_ack ),
 . i2s_output_apb_0_playback_dma_enable ( i2s_output_apb_0_playback_dma_enable ),
-. i2s_output_apb_0_capture_fifo_data ( i2s_output_apb_0_capture_fifo_data ), // <-- no loopback
+. i2s_output_apb_0_capture_fifo_data ( i2s_output_apb_0_capture_fifo_data ),
 . i2s_output_apb_0_capture_fifo_write ( i2s_output_apb_0_capture_fifo_write ) ,
 . i2s_output_apb_0_capture_fifo_empty ( i2s_output_apb_0_capture_fifo_empty ) ,
 . i2s_output_apb_0_capture_fifo_full ( i2s_output_apb_0_capture_fifo_full ),
@@ -331,6 +354,19 @@ soc_system soc_inst (
 . clock_bridge_0_out_clk_clk ( clock_bridge_0_out_clk_clk ),
 . clock_bridge_48_out_clk_clk ( clock_bridge_48_out_clk_clk ),
 . clock_bridge_44_out_clk_clk ( clock_bridge_44_out_clk_clk ),
+// Simple HPS Data in and out
+ .generic_apb_io_0_io_data_in ( hps_audio_sample_in ),              //            generic_apb_io_0_io.data_in
+ .generic_apb_io_0_io_data_out ( hps_audio_sample_out ),            //                               .data_out
+ .generic_apb_io_0_io_strobe ( hps_audio_strobe ),    				//											  .strobe
+ // FPGA to On-Chip Ram for Mass-Interaction network (connections, tensions, no mass or wall connections yet)
+ .mi_state_variable_buffer_s2_address      (mi_connection_memory_addr),  //       mi_state_variable_buffer_s2.address
+ .mi_state_variable_buffer_s2_chipselect   (1'b1),   			 			    //                                  .chipselect
+ .mi_state_variable_buffer_s2_clken        (1'b1),        	 			    //                                  .clken
+ .mi_state_variable_buffer_s2_write        (1'b0),    					    //                                  .write
+ .mi_state_variable_buffer_s2_readdata     (mi_connection_memory_read_data),     //                          .readdata
+ .mi_state_variable_buffer_s2_writedata    (1'b0),    //                          .writedata
+ .mi_state_variable_buffer_s2_byteenable   (4'b1111),    		 		    //                                  .byteenable
+ 
  // FPGA to On-Chip Ram Input Sample Buffer: 
  // address[0]: (new samples from HPS written)? 0xabcd:0, 
  // address[1]: current buffer size (set by HPS), 
@@ -347,7 +383,7 @@ soc_system soc_inst (
  
  // FPGA to On-Chip Ram Output Sample Buffer: 
  // address[0]:  (new samples from FPGA written)? 0xabcd:0,
- // address[1]: current measured buffer inteval time, 
+ // address[1]: nothing, 
  // address[2]to[511]: nothing (reserved)
  // addresses 512-1023: samples from FPGA, max 512 samples
   // base address is 0xC0005000
@@ -360,140 +396,160 @@ soc_system soc_inst (
  .out_smp_buf_s2_byteenable                 (4'b1111)   					   //                            .byteenable
 );
 
-reg[3:0] bufferTimingFSM = 0;
-parameter Wait = 0, NewBufferArrived = 1, ReadNSamples = 2, CopySamples = 3, WaitWriteAck = 4, WriteAck = 5, FinishAck = 6;
-wire reset = ~hps_0_h2f_reset_reset_n;
 
-wire signed [31:0] in_smp_buf_read_data;
-reg signed [31:0] in_smp_buf_write_data;
-reg unsigned [31:0]  in_smp_buf_addr; // 10bit is 0-1024
-reg in_smp_buf_we;
 
-wire signed [31:0] out_smp_buf_read_data;
-reg  signed [31:0] out_smp_buf_write_data;
-reg  [31:0]  out_smp_buf_addr; // 10bit is 0-1024
-reg out_smp_buf_we;
+assign fpga_led_pio[7:0] = buf_state[7:0];
 
-reg signed [31:0] in_smp_buf_n_smp = 0; // max 512 samples
-reg [31:0] smp_idx = 0;
-	
-// state machine: copy input to output buffer and write acknowledge 
-always @ (posedge fpga_clk1_50 or posedge reset) begin
-	if (reset) begin
-		bufferTimingFSM <= Wait;
-		in_smp_buf_we <= 0;
-		in_smp_buf_addr <= 0;
-		out_smp_buf_we <= 0;
-		out_smp_buf_addr <= 0;
-		counter_reset <= 0;
-		out_smp_buf_write_data <= 0;
-		in_smp_buf_write_data <= 0;
-		smp_idx = 0;
+assign gpio_0[0] = buf_state[0];
+assign gpio_0[1] = buf_state[1];
+assign gpio_0[2] = buf_state[2];
+
+// state machine: read and write to sample buffer
+// buffer_state = 0 idle / reset
+// buffer_state = 1 wait for new buffer to arrive
+// buffer_state = 2 new buffer arrived, wait one clock cycle for ram to read data
+// buffer_state = 3 read number of samples to process
+// buffer_state = 4 reset pipline
+// buffer_state = 5 read new sample
+// buffer_state = 6 wait for end of calculation
+// buffer_state = 7 write new sample (repeat from 4 or goto 7)
+// buffer_state = 8 buffer processed
+
+always @ (posedge fpga_clk1_50) begin
+	if (~hps_0_h2f_reset_reset_n) begin
+		buf_state <= 0;
 	end
-	else begin
-		case (bufferTimingFSM)
-			Wait: begin
-				in_smp_buf_we <= 0;
-				in_smp_buf_addr <= 0;
-				out_smp_buf_we <= 0;
-				out_smp_buf_addr <= 1;
-				counter_reset <= 0;
-				out_smp_buf_write_data <= 0;
-				in_smp_buf_write_data <= 0;
-				smp_idx = 0;
-				
-				if ( in_smp_buf_read_data == 32'h0000_abcd ) begin
-					
-					// read n_samples to transfer in two cycles (NewBufferArrived state)
-					in_smp_buf_addr <= 1;
-					out_smp_buf_addr <= 1;
-					// write counter output
-					out_smp_buf_we <= 1;
-					out_smp_buf_write_data <= counter_output;
-					counter_reset <= 1;
-					bufferTimingFSM <= NewBufferArrived;
-				end
-				else begin
-					bufferTimingFSM <= Wait;
-				end
-			end
-			
-			NewBufferArrived: begin
-				counter_reset <= 0;
-				in_smp_buf_we <= 0;
-				out_smp_buf_we <= 0;
-				// in another two clock cycles we get the first sample
-				// set index to first sample to transfer
-				in_smp_buf_addr <= 512;
-				bufferTimingFSM <= ReadNSamples;
-			end
-			
-			ReadNSamples: begin
-			// this state reads number of samples to process
-				in_smp_buf_we <= 0;
-				in_smp_buf_n_smp <= in_smp_buf_read_data;
-				in_smp_buf_addr <= 513;
-				bufferTimingFSM <= CopySamples;
-			end
-			
-			CopySamples: begin
-				if (smp_idx < in_smp_buf_n_smp-2) begin
-					// copy
-					out_smp_buf_we <= 1;
-					// advance input sample pointer
-					smp_idx = smp_idx + 1;
-					in_smp_buf_addr <= 513 + smp_idx;
-					out_smp_buf_addr <= 511 + smp_idx;
-					out_smp_buf_write_data = in_smp_buf_read_data;
-				end
-				else begin // done (but two samples still wait for transfer)
-					out_smp_buf_addr <= 511 + smp_idx + 1;
-					out_smp_buf_write_data = in_smp_buf_read_data;
-					in_smp_buf_addr <= 0; // one tick delay for write
-					bufferTimingFSM <= WaitWriteAck;
-				end
-			end
-			
-			WaitWriteAck: begin
-				out_smp_buf_addr <= 511 + smp_idx + 2;
-				out_smp_buf_write_data = in_smp_buf_read_data;
-				bufferTimingFSM <= WriteAck;
-				in_smp_buf_we <= 0;
-			end
-			
-			WriteAck: begin
-				out_smp_buf_addr <= 0; // one tick delay for write
-				out_smp_buf_write_data <= 32'h0000_abcd; // out_smp_buf[0] == 0xabcd signifies that buffer was processed
-				// clear new data arrived flag
-				in_smp_buf_we <= 1;
-				in_smp_buf_write_data <= 0;
-				// go to reset
-				bufferTimingFSM <= FinishAck; 
-			end
-			
-			FinishAck: begin
-				out_smp_buf_we <= 0;
-				in_smp_buf_we <= 0;
-				bufferTimingFSM <= Wait;
-			end
-			
-			default:
-				bufferTimingFSM <= Wait;
-		endcase
+	
+	if(buf_state == 0) begin // idle / reset
+		smp_idx = 0;
+		in_smp_buf_addr <= 0;
+		out_smp_buf_addr <= 0;
+		in_smp_buf_we <= 0;
+		out_smp_buf_we <= 0;
+		pipeline_reset <= 0;
+		buf_state <= 1;
+	end
+	
+	if(buf_state == 1) begin // wait for new buffer to arrive
+		if ( in_smp_buf_read_data == 32'h0000_abcd ) begin // new buffer arrived
+			buf_state <= 2;
+			// read n_samples to transfer in buf_state 2
+			in_smp_buf_addr <= 1;
+		end
+	end
+	
+	if(buf_state == 2) begin // wait
+		// wait: altera sync ram needs two clock cycles
+		buf_state <= 3;
+		// in another two clock cycles we need the first sample
+		// set index to first sample to transfer
+		in_smp_buf_addr <= 512;
+	end
+	
+	if(buf_state == 3) begin// this state reads number of samples to process
+		in_smp_buf_n_smp <= in_smp_buf_read_data;
+		buf_state <= 4;
+	end
+	
+	if(buf_state == 4) begin// reset mass-interaction pipeline
+		
+		out_smp_buf_we <= 0;
+		// advance input sample pointer
+		in_smp_buf_addr <= 512 + smp_idx;
+		buf_state <= 5;
+	end
+	
+	if(buf_state == 5) begin// wait for in_smp_buf_addr
+		buf_state <= 6;
+		pipeline_reset <= 1; //trigger mass-interaction pipeline
+	end
+	
+	
+	if(buf_state == 6) begin// read new sample
+		pipeline_reset <= 0;
+		diff1 = (in_smp_buf_read_data>>>5) - in_old;
+		diff2 = in_old - in_old_old;
+		acceleration = diff1 - diff2;
+		in_old_old = in_old;
+		in_old = in_smp_buf_read_data>>>5;
+		mi_pipeline_in <= acceleration;//in_smp_buf_read_data>>>6;//acceleration;
+		// advance output sample pointer
+		out_smp_buf_addr <= 512 + smp_idx;
+		out_smp_buf_we <= 0;
+		buf_state <= 7;
+	end
+	
+	if(buf_state == 7) begin// wait 
+		// wait until mass-interaction pipeline 
+		// is ready with the calculation
+		if (mi_pipeline_ready) begin
+			buf_state <= 8; // done, go to next state
+		end
+	end
+	
+	if(buf_state == 8) begin // write new sample
+		out_smp_buf_we <= 1;
+		out_smp_buf_write_data = mi_pipeline_out<<<5; // copy the sign bit from 27 bit to 32 bit integer
+		smp_idx = smp_idx + 1;
+		if (smp_idx < in_smp_buf_n_smp) begin
+			buf_state <= 4; // return to read another sample
+		end
+		else begin // buffer fully processed, go to next state
+			buf_state <= 9;
+		end
+	end
+	
+	if(buf_state == 9) begin // wait for address delay
+		out_smp_buf_we <= 0;
+		out_smp_buf_addr <= 0; // one tick delay for write
+		in_smp_buf_addr <= 0;
+		buf_state <= 10;
+	end
+	
+	if(buf_state == 10) begin // buffer processed
+		in_smp_buf_write_data <= 0; // clear new data arrived signal
+		out_smp_buf_write_data <= 32'h0000_abcd; // out_smp_buf[0] == 0xabcd signifies that buffer was processed
+		out_smp_buf_we <= 1;
+		in_smp_buf_we <= 1;
+		buf_state <= 0; // go to reset
 	end
 end
 
-assign fpga_led_pio[7:0] = counter_output[7:0];
 
-
-reg counter_reset = 0;
-wire [31:0] counter_output;
-Counter timeBetweenBuffers(
-	.clk(fpga_clk1_50),
-	.reset(counter_reset),
-	.count(counter_output)
+MIPipeline #(.N_MASSES(25)) mip(
+	.clk(fpga_clk1_50), 
+	.reset(pipeline_reset), 
+	.i_force(mi_pipeline_in), 
+	.out(mi_pipeline_out), 
+	.data_ready_flag(mi_pipeline_ready),
+	.shared_addr(mi_connection_memory_addr),
+	.shared_read_data(mi_connection_memory_read_data)
 );
+	
 
+
+
+/*
+wire pipeline_reset;
+EdgeDetector AudioStrobeDetect(.clk(fpga_clk1_50), .i_signal(hps_audio_strobe), .o_pos_edge(pipeline_reset)); 
+
+always @(posedge hps_audio_strobe )
+begin
+	diff1 = (hps_audio_sample_out>>>6) - in_old;
+	diff2 = in_old - in_old_old;
+	acceleration = diff1 - diff2;
+	in_old_old = in_old;
+	in_old = hps_audio_sample_out>>>6;
+	mi_pipeline_in = acceleration;
+	hps_audio_sample_in[31] = mi_pipeline_out[26]; // copy the sign bit from 27 bit to 32 bit integer
+	hps_audio_sample_in[30] = mi_pipeline_out[26]; 
+	hps_audio_sample_in[29] = mi_pipeline_out[26]; 
+	hps_audio_sample_in[28] = mi_pipeline_out[26]; 
+	hps_audio_sample_in[27] = mi_pipeline_out[26]; 
+	hps_audio_sample_in[26] = mi_pipeline_out[26]; 
+	hps_audio_sample_in[25:0] = mi_pipeline_out[25:0];
+end
+*/
 
 	wire i2s_playback_fifo_ack48;
 	wire i2s_data_out48;
@@ -594,7 +650,7 @@ Counter timeBetweenBuffers(
 
 	// Mux capture data
 	assign i2s_output_apb_0_capture_fifo_data = i2s_clkctrl_apb_0_conduit_clk_sel_48_44 ?
-		i2s_capture_fifo_data44 : i2s_capture_fifo_data48;
+		i2s_capture_fifo_data48 : i2s_capture_fifo_data44;
 
 	// Mux out
 	assign AUD_DACDAT = i2s_clkctrl_apb_0_conduit_clk_sel_48_44 ? i2s_data_out44 : i2s_data_out48;
@@ -602,10 +658,9 @@ Counter timeBetweenBuffers(
 	// Audio input
 	assign i2s_data_in44 = AUD_ADCDAT;
 	assign i2s_data_in48 = AUD_ADCDAT;
-
 	//assign i2s_data_in44 = i2s_data_out44; // Loopback for testing
 	//assign i2s_data_in48 = i2s_data_out48; // Loopback for testing
-		
+	
 	// Audio clocks inouts
 	assign AUD_BCLK = i2s_clkctrl_apb_0_conduit_master_slave_mode ?
 		i2s_clkctrl_apb_0_conduit_bclk : 1'bZ;
@@ -619,6 +674,19 @@ Counter timeBetweenBuffers(
 	assign i2s_clkctrl_apb_0_ext_playback_lrclk = i2s_clkctrl_apb_0_conduit_master_slave_mode ?
 		i2s_clkctrl_apb_0_conduit_playback_lrclk : AUD_DACLRCK;
 	assign i2s_clkctrl_apb_0_ext_capture_lrclk = i2s_clkctrl_apb_0_conduit_master_slave_mode ?
-		i2s_clkctrl_apb_0_conduit_capture_lrclk : AUD_DACLRCK; // shouldn't that be AUD_ADCLRCK ?
+		i2s_clkctrl_apb_0_conduit_capture_lrclk : AUD_ADCLRCK; // shouldn't that be AUD_ADCLRCK ?
+
+
+// Debounce logic to clean out glitches within 1ms
+debounce debounce_inst (
+  .clk                                  (fpga_clk1_50),
+  .reset_n                              (hps_0_h2f_reset_reset_n),  
+  .data_in                              (fpga_key_pio),
+  .data_out                             (fpga_debounced_buttons)
+);
+  defparam debounce_inst.WIDTH = 2;
+  defparam debounce_inst.POLARITY = "LOW";
+  defparam debounce_inst.TIMEOUT = 50000;               // at 50Mhz this is a debounce time of 1ms
+  defparam debounce_inst.TIMEOUT_WIDTH = 16;            // ceil(log2(TIMEOUT))
 
 endmodule

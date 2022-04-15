@@ -52,6 +52,7 @@
 *.summary
 # *.tcl
 *.txt # Explicitly add any text files used
+c5_pin_model_dump.txt
 *~
 *example*
 *sopc_*
@@ -70,3 +71,4 @@
 **/backup
 **/output_files
 **/hps_isw_handoff
+

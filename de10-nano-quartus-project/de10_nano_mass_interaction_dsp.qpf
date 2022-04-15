@@ -19,14 +19,15 @@
 #
 # Quartus Prime
 # Version 20.1.1 Build 720 11/11/2020 SJ Lite Edition
-# Date created = 20:47:18  April 14, 2022
+# Date created = 14:48:00  April 15, 2022
 #
 # -------------------------------------------------------------------------- #
 
 QUARTUS_VERSION = "20.1"
-DATE = "20:47:18  April 14, 2022"
+DATE = "14:48:00  April 15, 2022"
 
 # Revisions
 
+PROJECT_REVISION = "de10_nano_mass_interaction_dsp"
 PROJECT_REVISION = "de10_nano_audio_stream"
 PROJECT_REVISION = "de10-nano-audio-stream"
