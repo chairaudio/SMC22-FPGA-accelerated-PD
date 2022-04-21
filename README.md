@@ -1,6 +1,6 @@
 # Terasic DE10-Nano running Pure Data with FPGA DSP Subsystem
 
-This source code accompanies the paper Wegener, Clemens, Sebastian Stang and Max Neupert (2022). “FPGA-accelerated Real-Time Audio in Pure Data”. In: *Proceedings of the 19th Sound & Music Computing Conference*. Saint-Étienne: Université Jean Monnet of Saint-Étienne.
+This source code accompanies the paper Wegener, Stang and Neupert (2022). “FPGA-accelerated Real-Time Audio in Pure Data”. In: *Proceedings of the 19th Sound & Music Computing Conference*. Saint-Étienne: Université Jean Monnet of Saint-Étienne.
 
 ## Overview
 
