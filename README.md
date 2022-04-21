@@ -29,7 +29,7 @@ This system was built and tested with the Linux Console (kernel 4.5) image as a 
 - compile the boot script `u-boot.script`with `mkimage`, which is part of u-boot and place it on the sd card
 - compile the accompanying device tree `socfpga_cyclone5_de10_nano.dts` with the device tree compiler that ships with the Linux kernel, copy to sd card
 - download and compile Pure Data and the given externals for arm processors in `software/pure-data-patches/externals/` 
-- run the pure data patches via ssh and x-forwarding
+- run the Pure Pata patches via ssh and X-forwarding
 
 ## Hardware Setup
 
